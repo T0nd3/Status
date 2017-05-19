@@ -1,7 +1,9 @@
 package faeuster.pro.status;
 
-import java.awt.AWTException;
 import java.io.File;
+import java.text.NumberFormat;
+import java.util.HashMap;
+import java.util.Timer;
 import java.util.TimerTask;
 
 import org.jutils.jhardware.HardwareInfo;
@@ -9,10 +11,7 @@ import org.jutils.jhardware.HardwareInfo;
 import com.sun.javafx.binding.BidirectionalBinding;
 
 import javafx.application.Platform;
-import javafx.beans.property.DoubleProperty;
 import javafx.beans.property.SimpleDoubleProperty;
-import javafx.beans.value.ChangeListener;
-import javafx.beans.value.ObservableValue;
 import javafx.event.ActionEvent;
 import javafx.event.EventHandler;
 import javafx.scene.Scene;
@@ -32,11 +31,13 @@ public class Status {
 	private Stage stage;
 	private Scene aa;
 	private BorderPane bp;
-	DoubleProperty aRam = null;
-	DoubleProperty bRam = null;
-	double a;
+	private SimpleDoubleProperty aRam = new SimpleDoubleProperty();
+	private SimpleDoubleProperty bRam = new SimpleDoubleProperty();
+	private SimpleDoubleProperty a = new SimpleDoubleProperty();
+	private HashMap<String, SimpleDoubleProperty> fileSystems = new HashMap<String, SimpleDoubleProperty>();
+	private int counter = 0;
 
-	public void init(Stage primaryStage) throws AWTException {
+	public void init(Stage primaryStage) {
 
 		stage = primaryStage;
 		stage = new Stage();
@@ -76,61 +77,73 @@ public class Status {
 	public ViewItem getRAMComponent() {
 		final ViewItem item = new ViewItem(new Label("RAM verfügbar"), new Label("RAM Total"), new TextField(),
 				new TextField(), new ProgressBar());
-		// DoubleProperty b = null;
-		SimpleDoubleProperty availableMemoryProperty = new SimpleDoubleProperty(
-				Double.valueOf(HardwareInfo.getMemoryInfo().getAvailableMemory()) / 1024);
-		aRam = (DoubleProperty) DoubleProperty.doubleExpression(availableMemoryProperty);
-		BidirectionalBinding.bind(item.getFreeTXT().textProperty(), aRam, new NumberStringConverter());
-		SimpleDoubleProperty totalMemoryProperty = new SimpleDoubleProperty(
-				Double.valueOf(HardwareInfo.getMemoryInfo().getFullInfo().get("SystemDriverResidentBytes")) / 1024);
-		bRam = (DoubleProperty) DoubleProperty.doubleExpression(totalMemoryProperty);
-		BidirectionalBinding.bind(item.getTotalTXT().textProperty(), bRam, new NumberStringConverter());
+		aRam.set(Double.valueOf(HardwareInfo.getMemoryInfo().getAvailableMemory()) / 1024);
+		BidirectionalBinding.bind(item.getFreeTXT().textProperty(), aRam,
+				new NumberStringConverter(NumberFormat.getIntegerInstance()));
+		bRam.set(Double.valueOf(HardwareInfo.getMemoryInfo().getFullInfo().get("SystemDriverResidentBytes")) / 1024);
+		BidirectionalBinding.bind(item.getTotalTXT().textProperty(), bRam,
+				new NumberStringConverter(NumberFormat.getIntegerInstance()));
 
 		TimerTask task = new TimerTask() {
 
 			@Override
 			public void run() {
-				SimpleDoubleProperty availableMemoryProperty = new SimpleDoubleProperty(
-						Double.valueOf(HardwareInfo.getMemoryInfo().getAvailableMemory()) / 1024);
-				aRam = (DoubleProperty) DoubleProperty.doubleExpression(availableMemoryProperty);
-				SimpleDoubleProperty totalMemoryProperty = new SimpleDoubleProperty(
-						Double.valueOf(HardwareInfo.getMemoryInfo().getFullInfo().get("SystemDriverResidentBytes"))
-								/ 1024);
-				bRam = (DoubleProperty) DoubleProperty.doubleExpression(totalMemoryProperty);
-			}
-		};
-		task.run();
-		aRam.addListener(new ChangeListener<Number>() {
-
-			public void changed(ObservableValue<? extends Number> observable, Number oldValue, Number newValue) {
-				a = newValue.doubleValue() / bRam.getValue();
+				aRam.set(Double.valueOf(HardwareInfo.getMemoryInfo().getAvailableMemory()) / 1024);
+				bRam.set(Double.valueOf(HardwareInfo.getMemoryInfo().getFullInfo().get("SystemDriverResidentBytes"))
+						/ 1024);
+				a.set((bRam.get() - aRam.get()) / bRam.get());
 				Platform.runLater(new Runnable() {
 
 					public void run() {
-						item.getProgressBar().setProgress(a);
+						item.getProgressBar().setProgress(a.get());
 					}
 				});
-
 			}
-		});
+		};
+		Timer timer = new Timer();
+		timer.schedule(task, 0, 500);
+
+		if (a.get() == 0d) {
+			a.set((bRam.get() - aRam.get()) / bRam.get());
+		}
+		item.getProgressBar().setProgress(a.get());
 		// System.err.println("Prozessor: " +
 		// HardwareInfo.getProcessorInfo().getFullInfo().get("LoadPercentage"));
 		// System.err.println("Arbeitsspecherauslastung: " + (100 - ((a / b) *
 		// 100)));
 		//
 		// }
-
 		return item;
+	}
+
+	private Long mod(Long input) {
+		if (input / 1024 > 0) {
+			input = input / 1024;
+			counter++;
+			input = mod(input);
+		} else {
+			return input;
+		}
+		return input;
+
 	}
 
 	public ListView<ViewItem> getStorageComponent() {
 		ListView<ViewItem> l = new ListView<ViewItem>();
+
 		for (int ascii = 65; ascii <= 90; ascii++) {
 			File f = new File((char) ascii + ":/");
 			if (f.exists()) {
-
 				ViewItem item = new ViewItem(new Label((char) ascii + " Verfügbar"), new Label((char) ascii + " Total"),
 						new TextField(), new TextField(), new ProgressBar());
+				counter = 0;
+				Long mod = mod(f.getUsableSpace());
+				System.err.println(counter);
+
+				SimpleDoubleProperty free = new SimpleDoubleProperty(f.getUsableSpace() / 1024 / 1024 / 1024);
+				fileSystems.put(f + "free", free);
+				SimpleDoubleProperty total = new SimpleDoubleProperty(f.getTotalSpace() / 1024 / 1024 / 1024);
+				fileSystems.put(f + "total", total);
 
 				l.getItems().add(item);
 			}
@@ -160,9 +173,6 @@ public class Status {
 		// 100)));
 		//
 		// }
-
-		// System.err.println(f.getFreeSpace() / 1024 / 1024 / 1024);
-		// System.err.println(f.getTotalSpace() / 1024 / 1024 / 1024);
 
 		return l;
 	}
